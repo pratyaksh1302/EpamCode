@@ -1,0 +1,285 @@
+$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "location": {
+            "type": "string",
+            "defaultValue": "East US"
+        },
+        "virtualMachineName": {
+            "type": "string",
+            "defaultValue": "Prat-VM-",
+            "maxLength": 15
+        },
+        "virtualMachineSize": {
+            "type": "string",
+            "defaultValue": "Standard_DS2_v2"
+        },
+        "adminUsername": {
+            "type": "string",
+            "defaultValue": "pratyaksh675"
+        },
+        "virtualNetworkName": {
+            "type": "string",
+            "defaultValue": "Prat-vnet"
+        },
+		
+		"subnetName": {
+            "type": "String",
+			"defaultValue": "default"
+        
+    },
+		
+        "adminPassword": {
+            "type": "securestring",
+            "minLength": 8
+        },
+        "numberOfInstances": {
+            "type": "int",
+            "defaultValue": 3,
+            "minValue": 3,
+            "metadata": {
+              "description": "Number of VMs to deploy"
+            }
+        }
+    },
+    "variables": {
+        "vnetId": "[resourceId('Microsoft.Network/virtualNetworks', parameters('virtualNetworkName'))]",
+        "subnetRef": "[concat(variables('vnetId'), '/subnets/default')]",
+        "publicIpAddressType": "Dynamic",
+        "addressPrefix": "10.0.2.0/24",
+        "subnetPrefix": "10.0.2.0/24",
+        "availabilitySetName": "Prat-AV",
+        "diskSizeGB": 128
+    },
+    "resources": [
+        {
+            "name": "[variables('availabilitySetName')]",
+            "type": "Microsoft.Compute/availabilitySets",
+            "apiVersion": "2016-04-30-preview",
+            "location": "[parameters('location')]",
+            "properties": {
+                "platformFaultDomainCount": 3,
+                "platformUpdateDomainCount": 5,
+                "managed": true
+            }
+        },
+        {
+            "name": "[concat(parameters('virtualMachineName'), copyindex())]",
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2016-04-30-preview",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "nicloop",
+                "[concat('Microsoft.Compute/availabilitySets/', variables('availabilitySetName'))]"
+            ],
+            "properties": {
+                "osProfile": {
+                    "computerName": "[concat(parameters('virtualMachineName'), copyindex())]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "windowsConfiguration": {
+                        "provisionVmAgent": "true"
+                    }
+                },
+                "hardwareProfile": {
+                    "vmSize": "[parameters('virtualMachineSize')]"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "MicrosoftWindowsServer",
+                        "offer": "WindowsServer",
+                        "sku": "2016-Datacenter",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name" : "[concat(parameters('virtualMachineName'), copyindex(), '_OsDisk', uniqueString(subscription().subscriptionId))]",
+                        "diskSizeGB": "[variables('diskSizeGB')]",
+                        "createOption": "FromImage",
+                        "managedDisk": {
+                            "storageAccountType": "Premium_LRS"
+                        }
+                    },
+                    "dataDisks": []
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('virtualMachineName'), copyindex(), '-nic'))]"
+                        }
+                    ]
+                },
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets', variables('availabilitySetName'))]"
+                }
+            },
+            "copy": {
+                "name": "virtualMachineLoop",
+                "count": "[parameters('numberOfInstances')]"
+            }
+        },
+        {
+            "name": "[parameters('virtualNetworkName')]",
+            "type": "Microsoft.Network/virtualNetworks",
+            "apiVersion": "2016-12-01",
+            "location": "[parameters('location')]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "[variables('addressPrefix')]"
+                    ]
+                },
+                "subnets": [
+                    {
+                        "name": "default",
+                        "properties": {
+                            "addressPrefix": "[variables('subnetPrefix')]"
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "name": "[concat(parameters('virtualMachineName'), copyindex(), '-nic')]",
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2016-09-01",
+            "location": "[parameters('location')]",
+            "dependsOn": [
+                "[concat('Microsoft.Network/virtualNetworks/', parameters('virtualNetworkName'))]",
+                "ipLoop",
+                "nsgLoop"
+            ],
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic",
+                            "publicIpAddress": {
+                                "id": "[resourceId('Microsoft.Network/publicIpAddresses', concat(parameters('virtualMachineName'),copyindex(), '-ip'))]"
+                            }
+                        }
+                    }
+                ],
+                "networkSecurityGroup": {
+                    "id": "[resourceId('Microsoft.Network/networkSecurityGroups', concat(parameters('virtualMachineName'), copyindex(), '-nsg'))]"
+                }
+            },
+            "copy": {
+                "name": "nicLoop",
+                "count": "[parameters('numberOfInstances')]"
+            }
+        },
+        {
+            "name": "[concat(parameters('virtualMachineName'),copyindex(), '-ip')]",
+            "type": "Microsoft.Network/publicIpAddresses",
+            "apiVersion": "2016-11-01",
+            "location": "[parameters('location')]",
+            "properties": {
+                "publicIpAllocationMethod": "[variables('publicIpAddressType')]"
+            },
+            "copy": {
+                "name": "ipLoop",
+                "count": "[parameters('numberOfInstances')]"
+            }
+        },
+        {
+            "name": "[concat(parameters('virtualMachineName'), copyindex(), '-nsg')]",
+            "type": "Microsoft.Network/networkSecurityGroups",
+            "apiVersion": "2016-09-01",
+            "location": "[parameters('location')]",
+            "copy": {
+                "name": "nsgLoop",
+                "count": "[parameters('numberOfInstances')]"
+            }
+        },
+        {
+            "apiVersion": "2017-05-10",
+            "name": "[concat('linked-diagnostic-deployment-', copyIndex())]",
+            "type": "Microsoft.Resources/deployments",
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "https://abilityarmtemplate.blob.core.windows.net/arm-scripts-dev/Part.Template.VM.Diagnostics.json",
+                    "contentVersion": "1.0.0.0"
+                },
+                "parameters": {
+                    "templateDeploymentName": { "value" : "[concat(parameters('virtualMachineName'),copyindex(),'/IaaSDiagnostics')]"},
+                    "location": { "value" :"[parameters('location')]"},
+                    "storageAccount": { "value" :"[toLower(concat(replace(parameters('virtualMachineName'),'-',''), copyIndex(), 'diagstorage' ))]"},
+                    "virtualMachineId": { "value" :"[concat('/subscriptions/', subscription().subscriptionId, '/resourceGroups/', resourceGroup().name, '/providers/', 'Microsoft.Compute/virtualMachines/', parameters('virtualMachineName'), copyIndex())]"}
+                }
+            },
+            "copy": {
+                "name": "diagnosticLoop",
+                "count": "[parameters('numberOfInstances')]"
+            },
+            "dependsOn": [
+                "virtualMachineLoop",
+                "storageLoop"
+            ]
+        },
+        {
+            "name": "[concat('microsoft.antimalware-windows', copyIndex())]",
+            "apiVersion": "2015-01-01",
+            "type": "Microsoft.Resources/deployments",
+            "properties": {
+                "mode": "Incremental",
+                "templateLink": {
+                    "uri": "https://gallery.azure.com/artifact/20161101/microsoft.antimalware-windows-arm.1.0.0/Artifacts/MainTemplate.json"
+                },
+                "parameters": {
+                    "vmName": {
+                        "value": "[concat(parameters('virtualMachineName'),copyIndex())]"
+                    },
+                    "location": {
+                        "value": "[parameters('location')]"
+                    },
+                    "RealtimeProtectionEnabled": {
+                        "value": "true"
+                    },
+                    "ScheduledScanSettingsIsEnabled": {
+                        "value": "true"
+                    },
+                    "ScheduledScanSettingsScanType": {
+                        "value": "Quick"
+                    },
+                    "ScheduledScanSettingsDay": {
+                        "value": "7"
+                    },
+                    "ScheduledScanSettingsTime": {
+                        "value": "120"
+                    }
+                }
+            },
+            "copy": {
+                "name": "antimalwareLoop",
+                "count": "[parameters('numberOfInstances')]"
+            },
+            "dependsOn": [
+                "virtualMachineLoop"
+            ]
+        },
+        {
+            "name": "[toLower(concat(replace(parameters('virtualMachineName'),'-',''), copyIndex(), 'diagstorage' ))]",
+            "type": "Microsoft.Storage/storageAccounts",
+            "apiVersion": "2015-06-15",
+            "location": "[parameters('location')]",
+            "properties": {
+                "accountType": "Standard_LRS"
+            },
+            "copy": {
+                "name": "storageLoop",
+                "count": "[parameters('numberOfInstances')]"
+            }
+        }
+    ],
+    "outputs": {
+        "adminUsername": {
+            "type": "string",
+            "value": "[parameters('adminUsername')]"
+        }
+    }
+}
